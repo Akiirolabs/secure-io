@@ -66,6 +66,89 @@ export const createApp = () => {
     logEvents.controllerSucceeded(_req.requestId, "GET_TICKETS", 0, _req.user?.id);
   });
 
+  app.post("/tickets", authMiddleware, (req, res, next) => {
+    logEvents.controllerStarted(req.requestId, "CREATE_TICKET", req.user?.id, {
+      title: req.body.title
+    });
+
+    const { title, description, system, severity } = req.body;
+
+    if (!title || !description || !system || !severity) {
+      logEvents.controllerFailed(req.requestId, "CREATE_TICKET", 0, new Error("Missing required fields"), req.user?.id);
+      return next(new AppError("Missing required fields: title, description, system, severity", 400));
+    }
+
+    const validSeverities = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
+    if (!validSeverities.includes(severity)) {
+      return next(new AppError(`Invalid severity. Must be one of: ${validSeverities.join(", ")}`, 400));
+    }
+
+    const ticketId = `INC-${Date.now().toString().slice(-5)}`;
+    const newTicket = {
+      id: ticketId,
+      title,
+      description,
+      system,
+      severity: severity as "LOW" | "MEDIUM" | "HIGH" | "CRITICAL",
+      status: "OPEN" as const,
+      createdBy: req.user?.email || "System",
+      assignedTo: "Unassigned",
+      updatedAt: new Date().toISOString()
+    };
+
+    tickets.push(newTicket);
+    logEvents.controllerSucceeded(req.requestId, "CREATE_TICKET", 0, req.user?.id);
+    logEvents.ticketCreated(req.requestId, req.user?.id || "", ticketId);
+
+    res.status(201).json({ success: true, ticket: newTicket });
+  });
+
+  app.patch("/tickets/:ticketId", authMiddleware, (req, res, next) => {
+    const ticketIdParam = req.params.ticketId;
+    const ticketId = Array.isArray(ticketIdParam) ? ticketIdParam[0] : ticketIdParam;
+    const ticket = tickets.find((item) => item.id === ticketId);
+
+    logEvents.controllerStarted(req.requestId, "UPDATE_TICKET", req.user?.id, {
+      ticketId
+    });
+
+    if (!ticket) {
+      return next(new AppError("Ticket not found", 404));
+    }
+
+    const { status, assignedTo } = req.body;
+    const validStatuses = ["OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"];
+
+    if (status !== undefined && !validStatuses.includes(status)) {
+      return next(new AppError(`Invalid status. Must be one of: ${validStatuses.join(", ")}`, 400));
+    }
+
+    if (assignedTo !== undefined && (typeof assignedTo !== "string" || !assignedTo.trim())) {
+      return next(new AppError("assignedTo must be a non-empty string", 400));
+    }
+
+    if (status === undefined && assignedTo === undefined) {
+      return next(new AppError("Provide status or assignedTo to update the ticket", 400));
+    }
+
+    if (status !== undefined) {
+      ticket.status = status as "OPEN" | "IN_PROGRESS" | "RESOLVED" | "CLOSED";
+    }
+
+    if (assignedTo !== undefined) {
+      ticket.assignedTo = assignedTo.trim();
+    }
+
+    ticket.updatedAt = new Date().toISOString();
+
+    logEvents.controllerSucceeded(req.requestId, "UPDATE_TICKET", 0, req.user?.id, {
+      ticketId
+    });
+    logEvents.ticketUpdated(req.requestId, req.user?.id || "", ticketId);
+
+    res.json({ success: true, ticket });
+  });
+
   app.use(notFoundHandler);
   app.use(errorMiddleware);
 

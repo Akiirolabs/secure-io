@@ -1,121 +1,349 @@
-import { useEffect, useMemo, useState } from "react";
-import {
-  Activity,
-  Bell,
-  CheckCircle2,
-  CircleUserRound,
-  Database,
-  Filter,
-  LockKeyhole,
-  LogIn,
-  Plus,
-  Search,
-  ShieldCheck,
-  Siren,
-  TicketCheck,
-  Timer,
-  TriangleAlert
-} from "lucide-react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { api } from "./api";
-import { activity, Ticket, tickets } from "./data";
+import type {
+  CreateTicketInput,
+  Ticket,
+  TicketSeverity,
+  TicketStatus
+} from "./api";
 
 type ApiState = "checking" | "online" | "offline";
 
-const severityRank: Record<Ticket["severity"], number> = {
+const DEMO_EMAIL = "analyst@aegiscore.example";
+const DEMO_PASSWORD = "demo-password";
+const TOKEN_KEY = "secure-ticket-token";
+
+const emptyTicket: CreateTicketInput = {
+  title: "",
+  system: "",
+  severity: "MEDIUM",
+  description: ""
+};
+
+const severityRank: Record<TicketSeverity, number> = {
   CRITICAL: 4,
   HIGH: 3,
   MEDIUM: 2,
   LOW: 1
 };
 
+const statusLabel = (status: TicketStatus) => status.replace("_", " ");
+
+const formatUpdatedAt = (value: string) => {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? value
+    : new Intl.DateTimeFormat(undefined, {
+        dateStyle: "medium",
+        timeStyle: "short"
+      }).format(date);
+};
+
 export const App = () => {
   const [apiState, setApiState] = useState<ApiState>("checking");
-  const [activeTicketId, setActiveTicketId] = useState(tickets[0].id);
+  const [token, setToken] = useState(() => sessionStorage.getItem(TOKEN_KEY) ?? "");
+  const [email, setEmail] = useState(DEMO_EMAIL);
+  const [password, setPassword] = useState(DEMO_PASSWORD);
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [activeTicketId, setActiveTicketId] = useState("");
   const [query, setQuery] = useState("");
-  const [status, setStatus] = useState<Ticket["status"] | "ALL">("ALL");
-  const [session, setSession] = useState<"guest" | "analyst">("guest");
-  const [loginMessage, setLoginMessage] = useState("Console session pending");
+  const [statusFilter, setStatusFilter] = useState<TicketStatus | "ALL">("ALL");
+  const [isLoading, setIsLoading] = useState(false);
+  const [isLoginBusy, setIsLoginBusy] = useState(false);
+  const [loginError, setLoginError] = useState("");
+  const [pageError, setPageError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [newTicket, setNewTicket] = useState<CreateTicketInput>(emptyTicket);
+  const [createError, setCreateError] = useState("");
+  const [isCreating, setIsCreating] = useState(false);
+  const [editStatus, setEditStatus] = useState<TicketStatus>("OPEN");
+  const [editAssignee, setEditAssignee] = useState("");
+  const [isUpdating, setIsUpdating] = useState(false);
 
-  useEffect(() => {
-    api.health().then((result) => {
-      setApiState(result.ok ? "online" : "offline");
-    });
-  }, []);
+  const loadTickets = async (authToken: string) => {
+    setIsLoading(true);
+    setPageError("");
+    const result = await api.tickets(authToken);
+    setIsLoading(false);
 
-  const filteredTickets = useMemo(() => {
-    return tickets
-      .filter((ticket) => status === "ALL" || ticket.status === status)
-      .filter((ticket) => {
-        const value = `${ticket.id} ${ticket.title} ${ticket.system}`.toLowerCase();
-        return value.includes(query.toLowerCase());
-      })
-      .sort((a, b) => severityRank[b.severity] - severityRank[a.severity]);
-  }, [query, status]);
-
-  const activeTicket =
-    filteredTickets.find((ticket) => ticket.id === activeTicketId) ??
-    filteredTickets[0] ??
-    tickets[0];
-
-  const handleLogin = async () => {
-    const result = await api.login("analyst@aegiscore.example", "demo-password");
-
-    if (result.ok) {
-      setSession("analyst");
-      setLoginMessage("Analyst session active");
+    if (!result.ok) {
+      if (result.status === 401) {
+        sessionStorage.removeItem(TOKEN_KEY);
+        setToken("");
+      }
+      setPageError(result.message);
       return;
     }
 
-    setSession("analyst");
-    setLoginMessage(
-      result.status === 404
-        ? "Analyst console active; auth endpoint pending"
-        : result.message
-    );
+    setTickets(result.data.tickets);
+    setActiveTicketId((current) => {
+      const exists = result.data.tickets.some((ticket) => ticket.id === current);
+      return exists ? current : (result.data.tickets[0]?.id ?? "");
+    });
   };
+
+  useEffect(() => {
+    void api.health().then((result) => setApiState(result.ok ? "online" : "offline"));
+  }, []);
+
+  useEffect(() => {
+    if (token) {
+      void loadTickets(token);
+    }
+  }, [token]);
+
+  const filteredTickets = useMemo(
+    () =>
+      tickets
+        .filter((ticket) => statusFilter === "ALL" || ticket.status === statusFilter)
+        .filter((ticket) => {
+          const searchable = [
+            ticket.id,
+            ticket.title,
+            ticket.system,
+            ticket.createdBy,
+            ticket.assignedTo
+          ]
+            .join(" ")
+            .toLowerCase();
+          return searchable.includes(query.trim().toLowerCase());
+        })
+        .sort(
+          (left, right) =>
+            severityRank[right.severity] - severityRank[left.severity]
+        ),
+    [query, statusFilter, tickets]
+  );
+
+  const activeTicket =
+    tickets.find((ticket) => ticket.id === activeTicketId) ??
+    filteredTickets[0] ??
+    null;
+
+  useEffect(() => {
+    if (!activeTicket) {
+      return;
+    }
+    setEditStatus(activeTicket.status);
+    setEditAssignee(activeTicket.assignedTo);
+  }, [activeTicket]);
+
+  const metrics = useMemo(
+    () => ({
+      active: tickets.filter((ticket) =>
+        ["OPEN", "IN_PROGRESS"].includes(ticket.status)
+      ).length,
+      critical: tickets.filter(
+        (ticket) =>
+          ticket.severity === "CRITICAL" &&
+          !["RESOLVED", "CLOSED"].includes(ticket.status)
+      ).length,
+      unassigned: tickets.filter((ticket) => ticket.assignedTo === "Unassigned")
+        .length,
+      resolved: tickets.filter((ticket) =>
+        ["RESOLVED", "CLOSED"].includes(ticket.status)
+      ).length
+    }),
+    [tickets]
+  );
+
+  const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setLoginError("");
+    setIsLoginBusy(true);
+    const result = await api.login(email.trim(), password);
+    setIsLoginBusy(false);
+
+    if (!result.ok) {
+      setLoginError(result.message);
+      return;
+    }
+
+    sessionStorage.setItem(TOKEN_KEY, result.data.token);
+    setToken(result.data.token);
+  };
+
+  const handleLogout = () => {
+    sessionStorage.removeItem(TOKEN_KEY);
+    setToken("");
+    setTickets([]);
+    setActiveTicketId("");
+    setPageError("");
+    setNotice("");
+  };
+
+  const handleCreateTicket = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setCreateError("");
+
+    const input = {
+      ...newTicket,
+      title: newTicket.title.trim(),
+      system: newTicket.system.trim(),
+      description: newTicket.description.trim()
+    };
+
+    if (!input.title || !input.system || !input.description) {
+      setCreateError("Title, system, and description are required.");
+      return;
+    }
+
+    setIsCreating(true);
+    const result = await api.createTicket(token, input);
+    setIsCreating(false);
+
+    if (!result.ok) {
+      setCreateError(result.message);
+      return;
+    }
+
+    setTickets((current) => [result.data.ticket, ...current]);
+    setActiveTicketId(result.data.ticket.id);
+    setNewTicket(emptyTicket);
+    setIsCreateOpen(false);
+    setNotice(`${result.data.ticket.id} created and added to the incident queue.`);
+  };
+
+  const handleUpdateTicket = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!activeTicket) {
+      return;
+    }
+
+    const assignedTo = editAssignee.trim();
+    if (!assignedTo) {
+      setPageError("Assignee cannot be empty.");
+      return;
+    }
+
+    setIsUpdating(true);
+    setPageError("");
+    const result = await api.updateTicket(token, activeTicket.id, {
+      status: editStatus,
+      assignedTo
+    });
+    setIsUpdating(false);
+
+    if (!result.ok) {
+      setPageError(result.message);
+      return;
+    }
+
+    setTickets((current) =>
+      current.map((ticket) =>
+        ticket.id === result.data.ticket.id ? result.data.ticket : ticket
+      )
+    );
+    setNotice(`${result.data.ticket.id} updated successfully.`);
+  };
+
+  if (!token) {
+    return (
+      <main className="loginShell">
+        <section className="loginPanel">
+          <div className="loginBrand">
+            <LogoMark />
+            <div>
+              <strong>AegisCore</strong>
+              <span>Enterprise Service Operations</span>
+            </div>
+          </div>
+          <div className="loginCopy">
+            <p className="eyebrow">Secure operations workspace</p>
+            <h1>Manage incidents with one accountable workflow.</h1>
+            <p>
+              Triage requests, track ownership, and maintain an auditable view of
+              operational work.
+            </p>
+          </div>
+          <div className="loginStatus">
+            <span className={`statusDot ${apiState}`} />
+            {apiState === "checking"
+              ? "Checking service availability"
+              : apiState === "online"
+                ? "Ticket API is online"
+                : "Ticket API is unavailable"}
+          </div>
+        </section>
+
+        <section className="loginCard">
+          <p className="eyebrow">Analyst access</p>
+          <h2>Sign in to the console</h2>
+          <p className="muted">
+            Demo credentials are prefilled for the local development environment.
+          </p>
+          <form onSubmit={handleLogin}>
+            <label>
+              Work email
+              <input
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                autoComplete="username"
+                required
+              />
+            </label>
+            <label>
+              Password
+              <input
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                autoComplete="current-password"
+                required
+              />
+            </label>
+            {loginError && <div className="inlineMessage error">{loginError}</div>}
+            <button className="primaryButton loginButton" disabled={isLoginBusy}>
+              {isLoginBusy ? "Signing in..." : "Sign in"}
+            </button>
+          </form>
+        </section>
+      </main>
+    );
+  }
 
   return (
     <main className="shell">
       <aside className="sidebar">
         <div className="brandBlock">
-          <div className="brandMark">
-            <ShieldCheck size={24} />
-          </div>
+          <LogoMark />
           <div>
             <div className="brand">AegisCore</div>
-            <div className="brandSub">Operations Console</div>
+            <div className="brandSub">Service Operations</div>
           </div>
         </div>
 
-        <nav className="navStack" aria-label="Primary">
+        <nav className="navStack" aria-label="Primary navigation">
           <button className="navItem active">
-            <Siren size={18} />
-            Incidents
+            <Icon symbol="T" />
+            <span>Incident queue</span>
           </button>
-          <button className="navItem">
-            <Activity size={18} />
-            Telemetry
+          <button className="navItem" disabled title="Planned module">
+            <Icon symbol="S" />
+            <span>Service catalog</span>
           </button>
-          <button className="navItem">
-            <Database size={18} />
-            Assets
-          </button>
-          <button className="navItem">
-            <LockKeyhole size={18} />
-            Access
+          <button className="navItem" disabled title="Planned module">
+            <Icon symbol="R" />
+            <span>Reports</span>
           </button>
         </nav>
 
+        <div className="environmentCard">
+          <span>Environment</span>
+          <strong>Local development</strong>
+          <small>Tickets reset when the API restarts</small>
+        </div>
+
         <section className="sessionPanel">
-          <div className="sessionIcon">
-            <CircleUserRound size={22} />
-          </div>
+          <div className="avatar">NA</div>
           <div className="sessionText">
-            <span>{session === "analyst" ? "NOC Analyst" : "Guest Mode"}</span>
-            <small>{loginMessage}</small>
+            <span>NOC Analyst</span>
+            <small>{DEMO_EMAIL}</small>
           </div>
-          <button className="iconButton" onClick={handleLogin} aria-label="Log in">
-            <LogIn size={18} />
+          <button className="textButton" onClick={handleLogout}>
+            Sign out
           </button>
         </section>
       </aside>
@@ -123,65 +351,80 @@ export const App = () => {
       <section className="workspace">
         <header className="topbar">
           <div>
-            <p className="eyebrow">Enterprise Incident Command</p>
+            <p className="eyebrow">Enterprise incident management</p>
             <h1>Ticket Operations</h1>
+            <p className="headerSummary">
+              Monitor active work, maintain ownership, and resolve service impact.
+            </p>
           </div>
           <div className="topActions">
             <div className={`apiPill ${apiState}`}>
               <span />
-              {apiState === "checking"
-                ? "Checking API"
-                : apiState === "online"
-                  ? "API Online"
-                  : "API Offline"}
+              {apiState === "online" ? "API online" : "API offline"}
             </div>
-            <button className="iconButton" aria-label="Notifications">
-              <Bell size={18} />
+            <button
+              className="ghostButton"
+              onClick={() => void loadTickets(token)}
+              disabled={isLoading}
+            >
+              {isLoading ? "Refreshing..." : "Refresh"}
             </button>
-            <button className="primaryButton">
-              <Plus size={18} />
-              New Ticket
+            <button className="primaryButton" onClick={() => setIsCreateOpen(true)}>
+              <span aria-hidden="true">+</span>
+              New ticket
             </button>
           </div>
         </header>
 
+        {(pageError || notice) && (
+          <div className={`inlineMessage ${pageError ? "error" : "success"}`}>
+            {pageError || notice}
+            <button
+              aria-label="Dismiss message"
+              onClick={() => {
+                setPageError("");
+                setNotice("");
+              }}
+            >
+              ×
+            </button>
+          </div>
+        )}
+
         <section className="metricsGrid" aria-label="Ticket metrics">
-          <Metric label="Open Incidents" value="18" trend="+4 today" icon={<TicketCheck size={20} />} />
-          <Metric label="Critical" value="3" trend="1 escalated" icon={<TriangleAlert size={20} />} />
-          <Metric label="SLA Median" value="42m" trend="-12% week" icon={<Timer size={20} />} />
-          <Metric label="Resolved" value="96.4%" trend="30 day" icon={<CheckCircle2 size={20} />} />
+          <Metric label="Active incidents" value={metrics.active} detail="Open and in progress" tone="blue" />
+          <Metric label="Critical exposure" value={metrics.critical} detail="Requires immediate attention" tone="red" />
+          <Metric label="Unassigned" value={metrics.unassigned} detail="Awaiting queue ownership" tone="amber" />
+          <Metric label="Resolved" value={metrics.resolved} detail="Completed in this session" tone="green" />
         </section>
 
         <section className="operationsGrid">
-          <div className="queuePanel">
+          <section className="queuePanel">
             <div className="panelHeader">
               <div>
-                <h2>Incident Queue</h2>
-                <p>Prioritized by severity, status, and operational exposure.</p>
+                <p className="eyebrow">Operations queue</p>
+                <h2>Incidents</h2>
+                <p>{filteredTickets.length} of {tickets.length} tickets shown</p>
               </div>
-              <button className="ghostButton">
-                <Filter size={17} />
-                Rules
-              </button>
             </div>
 
             <div className="toolbar">
               <label className="searchBox">
-                <Search size={17} />
+                <span aria-hidden="true">⌕</span>
                 <input
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Search ticket, system, owner"
+                  placeholder="Search ID, title, system, or owner"
                 />
               </label>
               <select
-                value={status}
+                value={statusFilter}
                 onChange={(event) =>
-                  setStatus(event.target.value as Ticket["status"] | "ALL")
+                  setStatusFilter(event.target.value as TicketStatus | "ALL")
                 }
-                aria-label="Status filter"
+                aria-label="Filter by status"
               >
-                <option value="ALL">All status</option>
+                <option value="ALL">All statuses</option>
                 <option value="OPEN">Open</option>
                 <option value="IN_PROGRESS">In progress</option>
                 <option value="RESOLVED">Resolved</option>
@@ -190,96 +433,276 @@ export const App = () => {
             </div>
 
             <div className="ticketList">
-              {filteredTickets.map((ticket) => (
-                <button
-                  key={ticket.id}
-                  className={`ticketRow ${
-                    ticket.id === activeTicket.id ? "selected" : ""
-                  }`}
-                  onClick={() => setActiveTicketId(ticket.id)}
-                >
-                  <span className={`severity ${ticket.severity.toLowerCase()}`}>
-                    {ticket.severity}
-                  </span>
-                  <span className="ticketMain">
-                    <strong>{ticket.title}</strong>
-                    <small>
-                      {ticket.id} · {ticket.system}
-                    </small>
-                  </span>
-                  <span className="statusText">{ticket.status.replace("_", " ")}</span>
-                </button>
-              ))}
+              {isLoading ? (
+                <EmptyState title="Loading incidents..." detail="Retrieving the current queue from the API." />
+              ) : filteredTickets.length ? (
+                filteredTickets.map((ticket) => (
+                  <button
+                    key={ticket.id}
+                    className={`ticketRow ${ticket.id === activeTicket?.id ? "selected" : ""}`}
+                    onClick={() => setActiveTicketId(ticket.id)}
+                  >
+                    <span className={`severity ${ticket.severity.toLowerCase()}`}>
+                      {ticket.severity}
+                    </span>
+                    <span className="ticketMain">
+                      <strong>{ticket.title}</strong>
+                      <small>{ticket.id} · {ticket.system}</small>
+                    </span>
+                    <span className="ticketMeta">
+                      <span className={`statusBadge ${ticket.status.toLowerCase()}`}>
+                        {statusLabel(ticket.status)}
+                      </span>
+                      <small>{ticket.assignedTo}</small>
+                    </span>
+                  </button>
+                ))
+              ) : (
+                <EmptyState
+                  title="No matching incidents"
+                  detail="Adjust the search or status filter to view more tickets."
+                />
+              )}
             </div>
-          </div>
+          </section>
 
           <aside className="detailPanel">
-            <div className="detailTop">
-              <span className={`severity ${activeTicket.severity.toLowerCase()}`}>
-                {activeTicket.severity}
-              </span>
-              <span className="statusBadge">{activeTicket.status.replace("_", " ")}</span>
-            </div>
-            <h2>{activeTicket.title}</h2>
-            <p>{activeTicket.description}</p>
+            {activeTicket ? (
+              <>
+                <div className="detailTop">
+                  <span className={`severity ${activeTicket.severity.toLowerCase()}`}>
+                    {activeTicket.severity}
+                  </span>
+                  <span className={`statusBadge ${activeTicket.status.toLowerCase()}`}>
+                    {statusLabel(activeTicket.status)}
+                  </span>
+                </div>
+                <p className="ticketNumber">{activeTicket.id}</p>
+                <h2>{activeTicket.title}</h2>
+                <p className="ticketDescription">{activeTicket.description}</p>
 
-            <dl className="details">
-              <div>
-                <dt>Ticket</dt>
-                <dd>{activeTicket.id}</dd>
-              </div>
-              <div>
-                <dt>Created by</dt>
-                <dd>{activeTicket.createdBy}</dd>
-              </div>
-              <div>
-                <dt>Assigned to</dt>
-                <dd>{activeTicket.assignedTo}</dd>
-              </div>
-              <div>
-                <dt>Updated</dt>
-                <dd>{activeTicket.updatedAt}</dd>
-              </div>
-            </dl>
-
-            <div className="buttonRow">
-              <button className="primaryButton">Update Status</button>
-              <button className="ghostButton">Assign</button>
-            </div>
-
-            <section className="activityPanel">
-              <h3>Audit Stream</h3>
-              <div className="activityList">
-                {activity.map((item) => (
-                  <div className="activityItem" key={item}>
-                    <span />
-                    <p>{item}</p>
+                <dl className="details">
+                  <div>
+                    <dt>Affected system</dt>
+                    <dd>{activeTicket.system}</dd>
                   </div>
-                ))}
-              </div>
-            </section>
+                  <div>
+                    <dt>Requester</dt>
+                    <dd>{activeTicket.createdBy}</dd>
+                  </div>
+                  <div>
+                    <dt>Current owner</dt>
+                    <dd>{activeTicket.assignedTo}</dd>
+                  </div>
+                  <div>
+                    <dt>Last updated</dt>
+                    <dd>{formatUpdatedAt(activeTicket.updatedAt)}</dd>
+                  </div>
+                </dl>
+
+                <form className="updateForm" onSubmit={handleUpdateTicket}>
+                  <div className="formSectionHeader">
+                    <div>
+                      <h3>Workflow controls</h3>
+                      <p>Update ownership and lifecycle status.</p>
+                    </div>
+                  </div>
+                  <label>
+                    Status
+                    <select
+                      value={editStatus}
+                      onChange={(event) =>
+                        setEditStatus(event.target.value as TicketStatus)
+                      }
+                    >
+                      <option value="OPEN">Open</option>
+                      <option value="IN_PROGRESS">In progress</option>
+                      <option value="RESOLVED">Resolved</option>
+                      <option value="CLOSED">Closed</option>
+                    </select>
+                  </label>
+                  <label>
+                    Assigned team or analyst
+                    <input
+                      value={editAssignee}
+                      onChange={(event) => setEditAssignee(event.target.value)}
+                      placeholder="Unassigned"
+                    />
+                  </label>
+                  <button className="primaryButton" disabled={isUpdating}>
+                    {isUpdating ? "Saving changes..." : "Save changes"}
+                  </button>
+                </form>
+
+                <section className="auditPanel">
+                  <h3>Audit context</h3>
+                  <div className="auditItem">
+                    <span />
+                    <div>
+                      <strong>Ticket record loaded</strong>
+                      <p>Current API state is displayed in this workspace.</p>
+                    </div>
+                  </div>
+                  <div className="auditItem">
+                    <span />
+                    <div>
+                      <strong>Request tracing enabled</strong>
+                      <p>API responses include an X-Request-Id for server logs.</p>
+                    </div>
+                  </div>
+                </section>
+              </>
+            ) : (
+              <EmptyState
+                title="Select an incident"
+                detail="Choose a ticket from the queue to review its operational details."
+              />
+            )}
           </aside>
         </section>
       </section>
+
+      {isCreateOpen && (
+        <div
+          className="modalOverlay"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.currentTarget === event.target) {
+              setIsCreateOpen(false);
+            }
+          }}
+        >
+          <section className="modal" role="dialog" aria-modal="true" aria-labelledby="create-title">
+            <header className="modalHeader">
+              <div>
+                <p className="eyebrow">Incident intake</p>
+                <h2 id="create-title">Create a new ticket</h2>
+                <p>Capture enough context for fast triage and assignment.</p>
+              </div>
+              <button
+                className="modalClose"
+                onClick={() => setIsCreateOpen(false)}
+                aria-label="Close create ticket dialog"
+              >
+                ×
+              </button>
+            </header>
+            <form onSubmit={handleCreateTicket}>
+              <div className="modalBody">
+                <label>
+                  Ticket title
+                  <input
+                    value={newTicket.title}
+                    onChange={(event) =>
+                      setNewTicket((current) => ({ ...current, title: event.target.value }))
+                    }
+                    placeholder="Briefly summarize the issue"
+                    autoFocus
+                  />
+                </label>
+                <div className="formGrid">
+                  <label>
+                    Affected system
+                    <input
+                      value={newTicket.system}
+                      onChange={(event) =>
+                        setNewTicket((current) => ({ ...current, system: event.target.value }))
+                      }
+                      placeholder="Example: Identity Service"
+                    />
+                  </label>
+                  <label>
+                    Severity
+                    <select
+                      value={newTicket.severity}
+                      onChange={(event) =>
+                        setNewTicket((current) => ({
+                          ...current,
+                          severity: event.target.value as TicketSeverity
+                        }))
+                      }
+                    >
+                      <option value="LOW">Low</option>
+                      <option value="MEDIUM">Medium</option>
+                      <option value="HIGH">High</option>
+                      <option value="CRITICAL">Critical</option>
+                    </select>
+                  </label>
+                </div>
+                <label>
+                  Description
+                  <textarea
+                    value={newTicket.description}
+                    onChange={(event) =>
+                      setNewTicket((current) => ({
+                        ...current,
+                        description: event.target.value
+                      }))
+                    }
+                    placeholder="Describe the symptoms, scope, and business impact"
+                    rows={6}
+                  />
+                </label>
+                {createError && <div className="inlineMessage error">{createError}</div>}
+              </div>
+              <footer className="modalFooter">
+                <button
+                  type="button"
+                  className="ghostButton"
+                  onClick={() => setIsCreateOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button className="primaryButton" disabled={isCreating}>
+                  {isCreating ? "Creating ticket..." : "Create ticket"}
+                </button>
+              </footer>
+            </form>
+          </section>
+        </div>
+      )}
     </main>
   );
 };
 
+const LogoMark = () => (
+  <div className="brandMark" aria-hidden="true">
+    <span>A</span>
+  </div>
+);
+
+const Icon = ({ symbol }: { symbol: string }) => (
+  <span className="navIcon" aria-hidden="true">{symbol}</span>
+);
+
 const Metric = ({
   label,
   value,
-  trend,
-  icon
+  detail,
+  tone
 }: {
   label: string;
-  value: string;
-  trend: string;
-  icon: React.ReactNode;
+  value: number;
+  detail: string;
+  tone: "blue" | "red" | "amber" | "green";
 }) => (
-  <article className="metric">
-    <div className="metricIcon">{icon}</div>
+  <article className={`metric ${tone}`}>
     <span>{label}</span>
     <strong>{value}</strong>
-    <small>{trend}</small>
+    <small>{detail}</small>
   </article>
+);
+
+const EmptyState = ({
+  title,
+  detail
+}: {
+  title: string;
+  detail: string;
+}) => (
+  <div className="emptyState">
+    <div aria-hidden="true">—</div>
+    <strong>{title}</strong>
+    <p>{detail}</p>
+  </div>
 );

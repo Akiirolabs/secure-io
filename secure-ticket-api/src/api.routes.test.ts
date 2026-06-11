@@ -57,4 +57,67 @@ describe("API routes", () => {
     expect(response.body.success).toBe(true);
     expect(response.body.tickets).toEqual(tickets);
   });
+
+  it("should create a ticket when authorized", async () => {
+    const token = createAuthToken();
+    const originalLength = tickets.length;
+
+    const response = await request(app)
+      .post("/tickets")
+      .set("Authorization", `Bearer ${token}`)
+      .send({
+        title: "Customer portal unavailable",
+        description: "Users receive gateway errors when opening the portal.",
+        system: "Customer Portal",
+        severity: "HIGH"
+      });
+
+    expect(response.status).toBe(201);
+    expect(response.body.success).toBe(true);
+    expect(response.body.ticket).toMatchObject({
+      title: "Customer portal unavailable",
+      system: "Customer Portal",
+      severity: "HIGH",
+      status: "OPEN",
+      assignedTo: "Unassigned"
+    });
+    expect(tickets).toHaveLength(originalLength + 1);
+
+    tickets.pop();
+  });
+
+  it("should update ticket status and assignment when authorized", async () => {
+    const token = createAuthToken();
+    const ticket = tickets[0];
+    const originalStatus = ticket.status;
+    const originalAssignee = ticket.assignedTo;
+    const originalUpdatedAt = ticket.updatedAt;
+
+    const response = await request(app)
+      .patch(`/tickets/${ticket.id}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ status: "IN_PROGRESS", assignedTo: "Platform Operations" });
+
+    expect(response.status).toBe(200);
+    expect(response.body.ticket).toMatchObject({
+      id: ticket.id,
+      status: "IN_PROGRESS",
+      assignedTo: "Platform Operations"
+    });
+
+    ticket.status = originalStatus;
+    ticket.assignedTo = originalAssignee;
+    ticket.updatedAt = originalUpdatedAt;
+  });
+
+  it("should reject unsupported ticket status values", async () => {
+    const token = createAuthToken();
+    const response = await request(app)
+      .patch(`/tickets/${tickets[0].id}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ status: "WAITING_FOREVER" });
+
+    expect(response.status).toBe(400);
+    expect(response.body.message).toContain("Invalid status");
+  });
 });

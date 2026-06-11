@@ -2,7 +2,29 @@ const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") ??
   "http://localhost:3000";
 
-type ApiResult<T> =
+export type TicketSeverity = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+export type TicketStatus = "OPEN" | "IN_PROGRESS" | "RESOLVED" | "CLOSED";
+
+export type Ticket = {
+  id: string;
+  title: string;
+  description: string;
+  system: string;
+  severity: TicketSeverity;
+  status: TicketStatus;
+  createdBy: string;
+  assignedTo: string;
+  updatedAt: string;
+};
+
+export type CreateTicketInput = Pick<
+  Ticket,
+  "title" | "description" | "system" | "severity"
+>;
+
+export type UpdateTicketInput = Partial<Pick<Ticket, "status" | "assignedTo">>;
+
+export type ApiResult<T> =
   | { ok: true; data: T; requestId?: string }
   | { ok: false; message: string; status?: number; requestId?: string };
 
@@ -36,24 +58,42 @@ const request = async <T>(
 
     return { ok: true, data, requestId: data.requestId ?? requestId };
   } catch {
-    return {
-      ok: false,
-      message: "API unavailable"
-    };
+    return { ok: false, message: "API unavailable" };
   }
 };
 
+const authorized = (token: string): HeadersInit => ({
+  Authorization: `Bearer ${token}`
+});
+
 export const api = {
   health: () => request<{ success: boolean; message: string }>("/health"),
+
   login: (email: string, password: string) =>
     request<{ success: boolean; token: string }>("/auth/login", {
       method: "POST",
       body: JSON.stringify({ email, password })
     }),
+
   tickets: (token: string) =>
-    request<{ success: boolean; tickets: unknown[] }>("/tickets", {
-      headers: {
-        Authorization: `Bearer ${token}`
+    request<{ success: boolean; tickets: Ticket[] }>("/tickets", {
+      headers: authorized(token)
+    }),
+
+  createTicket: (token: string, input: CreateTicketInput) =>
+    request<{ success: boolean; ticket: Ticket }>("/tickets", {
+      method: "POST",
+      headers: authorized(token),
+      body: JSON.stringify(input)
+    }),
+
+  updateTicket: (token: string, ticketId: string, input: UpdateTicketInput) =>
+    request<{ success: boolean; ticket: Ticket }>(
+      `/tickets/${encodeURIComponent(ticketId)}`,
+      {
+        method: "PATCH",
+        headers: authorized(token),
+        body: JSON.stringify(input)
       }
-    })
+    )
 };
