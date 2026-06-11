@@ -5,7 +5,7 @@ import type {
   Ticket,
   TicketSeverity,
   TicketStatus
-} from "./api";
+} from "./types";
 
 type ApiState = "checking" | "online" | "offline";
 

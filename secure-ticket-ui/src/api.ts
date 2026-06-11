@@ -1,28 +1,12 @@
+import type {
+  CreateTicketInput,
+  Ticket,
+  UpdateTicketInput
+} from "./types";
+
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") ??
   "http://localhost:3000";
-
-export type TicketSeverity = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
-export type TicketStatus = "OPEN" | "IN_PROGRESS" | "RESOLVED" | "CLOSED";
-
-export type Ticket = {
-  id: string;
-  title: string;
-  description: string;
-  system: string;
-  severity: TicketSeverity;
-  status: TicketStatus;
-  createdBy: string;
-  assignedTo: string;
-  updatedAt: string;
-};
-
-export type CreateTicketInput = Pick<
-  Ticket,
-  "title" | "description" | "system" | "severity"
->;
-
-export type UpdateTicketInput = Partial<Pick<Ticket, "status" | "assignedTo">>;
 
 export type ApiResult<T> =
   | { ok: true; data: T; requestId?: string }
