@@ -149,6 +149,29 @@ export const createApp = () => {
     res.json({ success: true, ticket });
   });
 
+  app.delete("/tickets/:ticketId", authMiddleware, (req, res, next) => {
+    const ticketIdParam = req.params.ticketId;
+    const ticketId = Array.isArray(ticketIdParam) ? ticketIdParam[0] : ticketIdParam;
+    const ticketIndex = tickets.findIndex((item) => item.id === ticketId);
+
+    logEvents.controllerStarted(req.requestId, "DELETE_TICKET", req.user?.id, {
+      ticketId
+    });
+
+    if (ticketIndex === -1) {
+      return next(new AppError("Ticket not found", 404));
+    }
+
+    const [deletedTicket] = tickets.splice(ticketIndex, 1);
+
+    logEvents.controllerSucceeded(req.requestId, "DELETE_TICKET", 0, req.user?.id, {
+      ticketId
+    });
+    logEvents.ticketDeleted(req.requestId, req.user?.id || "", ticketId);
+
+    res.json({ success: true, ticket: deletedTicket });
+  });
+
   app.use(notFoundHandler);
   app.use(errorMiddleware);
 

@@ -120,4 +120,32 @@ describe("API routes", () => {
     expect(response.status).toBe(400);
     expect(response.body.message).toContain("Invalid status");
   });
+
+  it("should delete a ticket when authorized", async () => {
+    const token = createAuthToken();
+    const ticket = {
+      ...tickets[0],
+      id: "INC-DELETE-TEST",
+      title: "Temporary deletion test ticket"
+    };
+    tickets.push(ticket);
+
+    const response = await request(app)
+      .delete(`/tickets/${ticket.id}`)
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ success: true, ticket });
+    expect(tickets.some((item) => item.id === ticket.id)).toBe(false);
+  });
+
+  it("should return 404 when deleting an unknown ticket", async () => {
+    const token = createAuthToken();
+    const response = await request(app)
+      .delete("/tickets/INC-DOES-NOT-EXIST")
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(response.status).toBe(404);
+    expect(response.body.message).toBe("Ticket not found");
+  });
 });

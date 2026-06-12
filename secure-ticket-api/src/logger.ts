@@ -112,6 +112,14 @@ export const logEvents = {
       status: "success",
       metadata: { ticketId }
     }),
+  ticketDeleted: (requestId: string, userId: string, ticketId: string) =>
+    auditLog({
+      requestId,
+      userId,
+      action: "DELETE_TICKET",
+      status: "success",
+      metadata: { ticketId }
+    }),
   permissionDenied: (requestId: string, userId?: string, path?: string) =>
     logger.warn({ requestId, userId, path }, "Permission denied"),
   validationFailed: (
