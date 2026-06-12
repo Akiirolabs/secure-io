@@ -6,7 +6,8 @@ import type {
   TicketSeverity,
   TicketStatus,
   User,
-  UserRole
+  UserRole,
+  BugType
 } from "./types";
 
 type ApiState = "checking" | "online" | "offline";
@@ -19,7 +20,8 @@ const emptyTicket: CreateTicketInput = {
   title: "",
   system: "",
   severity: "MEDIUM",
-  description: ""
+  description: "",
+  type: "SOFTWARE"
 };
 
 const severityRank: Record<TicketSeverity, number> = {

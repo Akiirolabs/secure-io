@@ -130,3 +130,4 @@ npm --prefix secure-ticket-api run prisma:migrate
 ## Documentation
 
 - [File data flow](docs/file-data-flow.md)
+- [Current application state report](docs/current-app-state.md)
