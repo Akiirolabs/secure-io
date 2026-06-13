@@ -13,14 +13,81 @@
 }
 
 body {
+  position: relative;
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  overflow-x: hidden;
   background:
-    radial-gradient(circle at 85% 10%, rgba(29, 78, 216, 0.12), transparent 30%),
     linear-gradient(140deg, rgba(4, 12, 24, 0.96), rgba(8, 23, 42, 0.94)),
     url("/console-grid.svg") center / cover fixed,
     #07111f;
+}
+
+body::before,
+body::after {
+  position: fixed;
+  z-index: 0;
+  inset: -18%;
+  pointer-events: none;
+  content: "";
+  background-repeat: no-repeat;
+  filter: blur(72px);
+  will-change: transform;
+}
+
+body::before {
+  background-image:
+    radial-gradient(circle, rgba(14, 165, 233, 0.28) 0%, rgba(29, 78, 216, 0.15) 42%, transparent 70%),
+    radial-gradient(circle, rgba(37, 99, 235, 0.24) 0%, rgba(30, 64, 175, 0.12) 44%, transparent 72%),
+    radial-gradient(circle, rgba(2, 132, 199, 0.2) 0%, rgba(29, 78, 216, 0.1) 45%, transparent 72%);
+  background-position: 8% 14%, 78% 18%, 48% 82%;
+  background-size: 42% 48%, 38% 44%, 44% 50%;
+  animation: blueDriftPrimary 13s ease-in-out infinite alternate;
+}
+
+body::after {
+  background-image:
+    radial-gradient(circle, rgba(30, 64, 175, 0.2) 0%, rgba(30, 58, 138, 0.11) 44%, transparent 70%),
+    radial-gradient(circle, rgba(14, 165, 233, 0.2) 0%, rgba(3, 105, 161, 0.1) 45%, transparent 72%),
+    radial-gradient(circle, rgba(37, 99, 235, 0.18) 0%, rgba(30, 64, 175, 0.09) 46%, transparent 72%);
+  background-position: 22% 72%, 92% 62%, 58% 6%;
+  background-size: 38% 44%, 40% 46%, 34% 40%;
+  animation: blueDriftSecondary 17s ease-in-out infinite alternate;
+}
+
+#root {
+  position: relative;
+  z-index: 1;
+  min-height: 100vh;
+}
+
+@keyframes blueDriftPrimary {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+
+  50% {
+    transform: translate3d(18vw, 12vh, 0) scale(1.08) rotate(3deg);
+  }
+
+  100% {
+    transform: translate3d(-16vw, 24vh, 0) scale(1.12) rotate(-3deg);
+  }
+}
+
+@keyframes blueDriftSecondary {
+  0% {
+    transform: translate3d(0, 0, 0) scale(0.94);
+  }
+
+  50% {
+    transform: translate3d(-20vw, -15vh, 0) scale(1.1) rotate(-3deg);
+  }
+
+  100% {
+    transform: translate3d(22vw, -28vh, 0) scale(1.08) rotate(3deg);
+  }
 }
 
 button,
@@ -1063,6 +1130,13 @@ dd {
 .userRow select {
   min-height: 38px;
   padding: 8px 10px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body::before,
+  body::after {
+    animation: none;
+  }
 }
 
 @media (max-width: 1100px) {
